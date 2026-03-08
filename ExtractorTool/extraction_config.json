@@ -1,0 +1,128 @@
+{
+  "sheets": [
+    {
+      "name": "Intro",
+      "headers": {
+        "ENHANCEMENTS / PROJECT / DISCOVERY": [
+          "ENHANCEMENTS / PROJECT / DISCOVERY"
+        ],
+        "PROJECT MANAGER/SCRUM MASTER": [
+          "PROJECT MANAGER/SCRUM MASTER"
+        ],
+        "Is this an Agile or Waterfall Delivery": [
+          "Is this an Agile or Waterfall Delivery"
+        ]
+      }
+    },
+    {
+      "name": "Waterfall",
+      "headers": {
+        "CAPEX": [
+          "GTDP Manpower Estimations",
+          "3rd Party Implementation - OTHERS",
+          "Implementation - Travel and Others",
+          "Software",
+          "Hardware / Cloud Hosting",
+          "Contingency"
+        ],
+        "OPEX": [
+          {
+            "Incremental GTDP Manpower 5 year": [
+              {
+                "1. Current GTDP Labour Cost": {
+                  "instruction": "previous cell as table schema"
+                }
+              },
+              {
+                "2. Proposed GTDP Labour Cost": {
+                  "instruction": "use the previous schema"
+                }
+              }
+            ]
+          },
+          {
+            "Incremental Software 5 year": [
+              "Current Run Cost",
+              "Proposed Run Cost",
+              "Net Delta"
+            ]
+          },
+          {
+            "Incremental Hardware / Cloud Hosting 5 year": [
+              "Current Run Cost",
+              "Proposed Run Cost",
+              "Net Delta"
+            ]
+          },
+          {
+            "Incremental 3rd Party / Implementation Support Cost": [
+              "Current Run Cost",
+              "Proposed Run Cost",
+              "Net Delta"
+            ]
+          },
+          "Net Delta Incremenatl OPEX"
+        ],
+        "COST BENEFIT ANALYSIS": [
+          "Recurrent Cashflow"
+        ],
+        "FOR BUSINESS CASE": [
+          "FOR BUSINESS CASE"
+        ],
+        "ROI CALCULATION": [
+          "ROI CALCULATION"
+        ]
+      }
+    },
+    {
+      "name": "Agile",
+      "headers": {
+        "CAPEX": [
+          "GTDP Manpower Estimations",
+          "3rd Party Implementation - OTHERS",
+          "Implementation - Travel and Others",
+          "Software",
+          "Hardware / Cloud Hosting",
+          "Contingency"
+        ],
+        "OPEX": [
+          {
+            "Incremental GTDP Manpower 5 year": [
+              {
+                "1. Current GTDP Labour Cost": {
+                  "instruction": "previous cell as table schema"
+                }
+              },
+              {
+                "2. Proposed GTDP Labour Cost": {
+                  "instruction": "use the previous schema"
+                }
+              }
+            ]
+          },
+          {
+            "Incremental Software '5 year": [
+              "Current Run Cost",
+              "Proposed Run Cost"
+            ]
+          },
+          {
+            "Incremental Hardware / Cloud Hosting 5 year": [
+              "Current Run Cost",
+              "Proposed Run Cost",
+              "Net Delta"
+            ]
+          },
+          {
+            "Incremental 3rd Party / Implementation Support Cost": [
+              "Current Run Cost",
+              "Proposed Run Cost",
+              "Net Delta"
+            ]
+          },
+          "Net Delta Incremental OPEX"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+# Base Utilities
+python-dotenv==1.2.1
+requests==2.32.5
+pyodbc
+SQLAlchemy==2.0.47
+pandas==3.0.1
+beautifulsoup4==4.14.3
+lxml==6.0.2
+openpyxl==3.1.5
+
+# Microsoft Agent Framework & Orchestration
+agent-framework==1.0.0rc3
+agent-framework-azure-ai==1.0.0rc3
+celery
+redis
+nest-asyncio
+openai
+pydantic
+pydantic-settings
+
+# API Backend
+fastapi
+uvicorn
+python-multipart
+
+# Extraction Specifics
+aspose-cells-python==26.2.0
+
+# Scientific/Calculation (from afg_final)
+numpy==2.4.2
+sympy==1.14.0
+mpmath==1.3.0
+
+# Display & Logging
+coloredlogs==15.0.1
+colorama==0.4.6
