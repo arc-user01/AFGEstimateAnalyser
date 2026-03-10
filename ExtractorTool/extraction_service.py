@@ -3,8 +3,6 @@ import sys
 import io
 import json
 import logging
-import redis
-import time
 from datetime import datetime
 from typing import Optional
 from fastapi import FastAPI, HTTPException
@@ -32,47 +30,67 @@ from utils.roi_engine import load_soup_rows, process_roi_section, save_roi_block
 env_path = os.path.join(project_root, '.env')
 load_dotenv(env_path)
 
+
+def _resolve_base_dir(env_key: str, project_root: str) -> str:
+    """Read dir from .env and return a fully qualified (absolute) path. Relative paths are resolved against project_root."""
+    raw = (os.getenv(env_key) or "").strip()
+    if not raw:
+        return ""
+    if os.path.isabs(raw):
+        return os.path.normpath(raw)
+    return os.path.abspath(os.path.join(project_root, raw))
+
+
+def _fully_qualified_job_dir(base_dir: str, job_id: str) -> str:
+    """Build fully qualified path: base_dir / fl_{job_id}."""
+    if not base_dir or not job_id:
+        return ""
+    return os.path.abspath(os.path.join(base_dir, f"fl_{job_id}"))
+
 app = FastAPI(title="TCO Extraction Service")
 
-# Redis for traceability
-redis_url = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
-r_client = redis.from_url(redis_url)
-trace_prefix = os.getenv("TRACEBILITY_QUEUE_PREFIX", "tracebility_queue:")
 
 class ExtractionRequest(BaseModel):
     task_id: str
     tco_file_path: str
 
+
 def log_trace(task_id: str, message: str, level: str = "INFO"):
-    """Pushes a granular log event to Redis for the frontend to consume."""
-    queue_name = f"{trace_prefix}{task_id}"
-    log_entry = {
-        "timestamp": datetime.now().isoformat(),
-        "level": level,
-        "message": message,
-        "task_id": task_id
-    }
-    r_client.rpush(queue_name, json.dumps(log_entry))
-    print(f"[{level}] {message}")
+    """Log a trace message (console only; Redis/Celery removed)."""
+    print(f"[{level}] [{task_id}] {message}")
 
 @app.post("/extract")
 async def extract_tco(req: ExtractionRequest):
-    task_id = req.task_id
+    task_id = req.task_id  # JOBID from input
+    job_id = task_id
     excel_file = req.tco_file_path
-    base_html_out_dir = os.getenv("HTML_OUT_DIR")
-    base_results_dir = os.getenv("RESULTS_DIR")
-    config_path = os.getenv("EXTRACTION_CONFIG_PATH")
 
-    if not all([excel_file, base_html_out_dir, base_results_dir, config_path]):
-        error_msg = "Missing path configuration in .env or request."
+    # Read HTML_OUT_DIR and RESULTS_DIR from .env; resolve to fully qualified paths (relative = resolved against PROJECT_ROOT or project_root)
+    resolve_base = (os.getenv("PROJECT_ROOT") or "").strip() or project_root
+    base_html_out_dir = _resolve_base_dir("HTML_OUT_DIR", resolve_base)
+    base_results_dir = _resolve_base_dir("RESULTS_DIR", resolve_base)
+    config_path = os.getenv("EXTRACTION_CONFIG_PATH", "").strip()
+    if config_path and not os.path.isabs(config_path):
+        config_path = os.path.abspath(os.path.join(resolve_base, config_path))
+
+    if not excel_file:
+        error_msg = "Missing tco_file_path in request."
+        log_trace(task_id, error_msg, "ERROR")
+        raise HTTPException(status_code=500, detail=error_msg)
+    if not base_html_out_dir or not base_results_dir:
+        error_msg = "Missing HTML_OUT_DIR or RESULTS_DIR in .env."
+        log_trace(task_id, error_msg, "ERROR")
+        raise HTTPException(status_code=500, detail=error_msg)
+    if not config_path or not os.path.isfile(config_path):
+        error_msg = f"Extraction config not found: {config_path}"
         log_trace(task_id, error_msg, "ERROR")
         raise HTTPException(status_code=500, detail=error_msg)
 
     log_trace(task_id, f"Extraction Phase Started for file: {os.path.basename(excel_file)}")
-    
-    # Create isolated directories for this specific task
-    html_out_dir = os.path.join(base_html_out_dir, f"fl_{task_id}")
-    results_dir = os.path.join(base_results_dir, f"fl_{task_id}")
+
+    # Create fully qualified per-JOBID paths: base_from_env / fl_{job_id}
+    html_out_dir = _fully_qualified_job_dir(base_html_out_dir, job_id)
+    results_dir = _fully_qualified_job_dir(base_results_dir, job_id)
     os.makedirs(html_out_dir, exist_ok=True)
     os.makedirs(results_dir, exist_ok=True)
     log_trace(task_id, f"Created isolated directories: {html_out_dir} and {results_dir}")
@@ -209,8 +227,11 @@ async def extract_tco(req: ExtractionRequest):
         return {
             "status": "success",
             "task_id": task_id,
+            "job_id": job_id,
             "detected_mode": delivery_val,
-            "sheets_processed": processed_count
+            "sheets_processed": processed_count,
+            "html_dir": html_out_dir,
+            "results_dir": results_dir,
         }
 
     except Exception as e:
