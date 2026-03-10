@@ -10,7 +10,7 @@ Welcome to the unified AFG Estimate Analyser ecosystem. This repository consolid
     - `requirements.txt`: Single pip requirements file for the whole project.
     - **`MSAF/`**: Microsoft Agent Framework (Orchestrator, Tools, Worker).
     - **`ExtractorTool/`**: TCO Extraction Logic, ROI engine, and Validation Rules.
-    - **`agent_backend/`**: FastAPI Backend that serves the UI and manages tasks.
+    - **`MSAF/main.py`**: FastAPI Backend that serves the API and runs the workflow (no Celery/Redis).
     - **`ui/`**: React-based administration and analysis dashboard.
     - **`data/`**: Centralized storage for HTML extraction, results, and uploads.
 
@@ -28,33 +28,30 @@ Welcome to the unified AFG Estimate Analyser ecosystem. This repository consolid
 
 ## Running the System (End-to-End)
 
-You will need 4 terminal windows open (all from the root `AFGEstimateAnalyser` folder):
+Celery and Redis have been removed. Run these from the project root (`AFGEstimateAnalyser`):
 
-1. **Extraction Service:**
+1. **Extraction Service** (optional; only if you need extraction before MSAF):
    ```bash
    python ExtractorTool/extraction_service.py
    ```
-   *(Running on http://localhost:1204)*
+   *(http://localhost:1204)*
 
-2. **Celery Worker (MSAF):**
+2. **Backend API (MSAF):**
    ```bash
-   celery -A MSAF.worker worker --loglevel=info -P threads --concurrency=10
+   python MSAF/main.py
    ```
+   *(http://localhost:2357)*
 
-3. **Backend API:**
-   ```bash
-   python agent_backend/main.py
-   ```
-   *(Running on http://localhost:2357)*
-
-4. **Frontend UI:**
+3. **Frontend UI** (optional):
    ```bash
    cd ui
    npm run dev
    ```
 
+Trigger the workflow via `POST /api/v1/msaf_process` (jobID, tco_file_url, retry_flag). No Redis or Celery worker required.
+
 ## Key Consolidated Features
 
 - **Unified SQL Client**: `sql_client.py` handles all raw pyodbc and SQLAlchemy connections.
 - **Improved Rule Sandbox**: Rule execution includes auto-loading of `df` and safe JSON serialization for DataFrames.
-- **Centralized Traceability**: All logs from extraction through agent reasoning flow to the UI sidebar in real-time.
+- **Console logging**: Task and extraction logs go to the console (Redis traceability removed).

@@ -3,8 +3,6 @@ import sys
 import io
 import json
 import logging
-import redis
-import time
 from datetime import datetime
 from typing import Optional
 from fastapi import FastAPI, HTTPException
@@ -51,26 +49,15 @@ def _fully_qualified_job_dir(base_dir: str, job_id: str) -> str:
 
 app = FastAPI(title="TCO Extraction Service")
 
-# Redis for traceability
-redis_url = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
-r_client = redis.from_url(redis_url)
-trace_prefix = os.getenv("TRACEBILITY_QUEUE_PREFIX", "tracebility_queue:")
 
 class ExtractionRequest(BaseModel):
     task_id: str
     tco_file_path: str
 
+
 def log_trace(task_id: str, message: str, level: str = "INFO"):
-    """Pushes a granular log event to Redis for the frontend to consume."""
-    queue_name = f"{trace_prefix}{task_id}"
-    log_entry = {
-        "timestamp": datetime.now().isoformat(),
-        "level": level,
-        "message": message,
-        "task_id": task_id
-    }
-    r_client.rpush(queue_name, json.dumps(log_entry))
-    print(f"[{level}] {message}")
+    """Log a trace message (console only; Redis/Celery removed)."""
+    print(f"[{level}] [{task_id}] {message}")
 
 @app.post("/extract")
 async def extract_tco(req: ExtractionRequest):

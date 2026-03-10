@@ -94,10 +94,6 @@ def run_rule_validation(
             task_name = task.get("task_name", "Unnamed Task")
             log_msg = f"--- [Rule: {rule_code}] Starting Task {inner_task_id}: {task_name} ---"
             logger.info(log_msg)
-            # Push to Redis for frontend traceability
-            from MSAF.logger import RedisLogHandler
-            r_handler = RedisLogHandler(task_id)
-            r_handler.emit(logging.LogRecord("tools", logging.INFO, "tools.py", 100, log_msg, None, None))
 
             code = task.get("fn_code")
             if not code:
@@ -168,7 +164,6 @@ def run_rule_validation(
             if task_res["success"]:
                 log_finish = f"Task {inner_task_id} COMPLETED successfully."
                 logger.info(log_finish)
-                r_handler.emit(logging.LogRecord("tools", logging.INFO, "tools.py", 200, log_finish, None, None))
                 overall_results.append({
                     "task_id": inner_task_id,
                     "task_name": task_name,
@@ -181,8 +176,7 @@ def run_rule_validation(
                      log_fail_msg += f"\nTraceback: {task_res.get('traceback')}"
                 
                 logger.error(f"Task {inner_task_id} FAILED: {task_res.get('error')}")
-                r_handler.emit(logging.LogRecord("tools", logging.ERROR, "tools.py", 200, log_fail_msg, None, None))
-                
+
                 overall_results.append({
                     "task_id": inner_task_id,
                     "task_name": task_name,
