@@ -21,6 +21,7 @@ if project_root not in sys.path:
     sys.path.append(project_root)
 
 from sql_client import DatabaseClient
+from MSAF.summarization import summarize_rule_output as _summarize_rule_output
 
 # Ensure the framework directory is in the path for both this process and spawned children
 framework_dir = os.path.dirname(os.path.abspath(__file__))
@@ -205,3 +206,22 @@ def run_rule_validation(
 
     except Exception as e:
         return f"Execution Error for {rule_code}: {str(e)}\n{traceback.format_exc()}"
+
+
+@tool(approval_mode="never_require")
+def summarize_rule_output(
+    rule_code: Annotated[str, Field(description="The unique code of the rule (e.g. from get_available_rules or run_rule_validation).")],
+    rule_description: Annotated[str, Field(description="Short description of what the rule validates or does.")],
+    output: Annotated[str, Field(description="Raw output to summarize (e.g. JSON or text from run_rule_validation).")]
+) -> str:
+    """
+    Summarizes a rule's output using a standard prompt with placeholders for rule_code,
+    rule_description, and Output. The output is processed for display using Markdown and
+    HTML tags: table, ul, li, h1, h2 for clear presentation.
+    """
+    logger.info(f"Tool Action: Summarizing rule output | Rule: {rule_code}")
+    try:
+        return _summarize_rule_output(rule_code, rule_description, output)
+    except Exception as e:
+        logger.error(f"Summarization failed: {e}")
+        return f"Summarization Error: {str(e)}\n{traceback.format_exc()}"
