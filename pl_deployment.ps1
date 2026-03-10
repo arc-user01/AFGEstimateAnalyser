@@ -8,7 +8,6 @@ $uiDir = Join-Path $rootDir "ui"
 Write-Host "--- Stopping existing jobs and orphaned processes ---" -ForegroundColor Cyan
 Get-Job | Remove-Job -Force 2>$null
 taskkill /F /IM python.exe /T 2>$null
-taskkill /F /IM celery.exe /T 2>$null
 taskkill /F /IM node.exe /T 2>$null
 
 Write-Host "`n--- Starting AFG Estimate Analyser Deployment ---" -ForegroundColor Cyan
@@ -30,7 +29,6 @@ if (-not (Test-Path (Join-Path $uiDir "node_modules"))) {
 }
 
 # 3. Environment Variables Setup (for Jobs)
-# We will pass these to the background jobs
 $envVars = @{
     "PYTHONPATH" = $rootDir
     "PROJECT_ROOT" = $rootDir
@@ -42,30 +40,21 @@ $envVars = @{
 Write-Host "Starting Extraction Service on http://localhost:1204..." -ForegroundColor Green
 Start-Job -Name "ExtractionService" -ScriptBlock {
     param($root, $env)
-    $env.Keys | ForEach-Object { [System.Environment]::SetEnvironmentVariable($_, $env[$_]) }
+    foreach ($key in $env.Keys) { Set-Item "Env:$key" $env[$key] }
     cd $root
     .\venv\Scripts\python.exe ExtractorTool\extraction_service.py
 } -ArgumentList $rootDir, $envVars
 
-# 5. Start Celery Worker (Background Job)
-Write-Host "Starting Celery Worker (MSAF)..." -ForegroundColor Green
-Start-Job -Name "CeleryWorker" -ScriptBlock {
+# 5. Start MSAF Standalone API (Background Job)
+Write-Host "Starting Standalone MSAF API on http://localhost:2357..." -ForegroundColor Green
+Start-Job -Name "MSAF_API" -ScriptBlock {
     param($root, $env)
-    $env.Keys | ForEach-Object { [System.Environment]::SetEnvironmentVariable($_, $env[$_]) }
+    foreach ($key in $env.Keys) { Set-Item "Env:$key" $env[$key] }
     cd $root
-    .\venv\Scripts\celery.exe -A MSAF.worker worker --loglevel=info -P threads --concurrency=10
+    .\venv\Scripts\python.exe MSAF/main.py
 } -ArgumentList $rootDir, $envVars
 
-# 6. Start Backend API (Background Job)
-Write-Host "Starting Backend API on http://localhost:2357..." -ForegroundColor Green
-Start-Job -Name "BackendAPI" -ScriptBlock {
-    param($root, $env)
-    $env.Keys | ForEach-Object { [System.Environment]::SetEnvironmentVariable($_, $env[$_]) }
-    cd $root
-    .\venv\Scripts\python.exe agent_backend\main.py
-} -ArgumentList $rootDir, $envVars
-
-# 7. Start Frontend UI
+# 6. Start Frontend UI
 Write-Host "Starting Frontend UI (npm run dev)..." -ForegroundColor Green
 Start-Job -Name "FrontendUI" -ScriptBlock {
     param($ui)

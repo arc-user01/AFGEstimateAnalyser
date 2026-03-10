@@ -36,37 +36,43 @@ app.conf.update(
 )
 
 @app.task(bind=True, name="process_extraction_task")
-def process_extraction_task(self, tco_file_url=None, questionaries_file_url=None, rule_code=None):
+def process_extraction_task(self, tco_file_url=None, questionaries_file_url=None, rule_code=None, retry_flag=False):
     """
     Main entry point for the frontend to trigger an agent validation/extraction task.
     """
     task_id = self.request.id
     logger = setup_task_logger(task_id, f"Worker_{task_id}")
     
-    logger.info(f"Received extraction task {task_id}")
+    logger.info(f"Received extraction task {task_id} | Retry: {retry_flag}")
     logger.info(f"TCO: {tco_file_url} | Questionaries: {questionaries_file_url} | Rule: {rule_code}")
     
     import requests
     extraction_url = os.getenv("EXTRACTION_SERVICE_URL", "http://localhost:1204")
     
     try:
-        # Phase 1: Call Extraction Service
-        logger.info(f"--- [Phase 1: Starting Data Extraction] ---")
-        # Handle file:// URLs by converting back to path for the local service
-        tco_path = tco_file_url.replace("file://", "") if tco_file_url else ""
-        
-        response = requests.post(f"{extraction_url}/extract", json={
-            "task_id": task_id,
-            "tco_file_path": tco_path
-        }, timeout=300) # Long timeout for extraction
-        
-        if response.status_code != 200:
-            error_msg = f"Extraction Service failed with status {response.status_code}: {response.text}"
-            logger.error(error_msg)
-            return {"status": "error", "task_id": task_id, "error": error_msg}
-        
-        extraction_res = response.json()
-        logger.info(f"--- [Phase 1: Extraction Complete] | Mode: {extraction_res.get('detected_mode')} ---")
+        extraction_res = {}
+        if not retry_flag:
+            # Phase 1: Call Extraction Service
+            logger.info(f"--- [Phase 1: Starting Data Extraction] ---")
+            # Handle file:// URLs by converting back to path for the local service
+            tco_path = tco_file_url.replace("file://", "") if tco_file_url else ""
+            
+            response = requests.post(f"{extraction_url}/extract", json={
+                "task_id": task_id,
+                "tco_file_path": tco_path
+            }, timeout=300) # Long timeout for extraction
+            
+            if response.status_code != 200:
+                error_msg = f"Extraction Service failed with status {response.status_code}: {response.text}"
+                logger.error(error_msg)
+                return {"status": "error", "task_id": task_id, "error": error_msg}
+            
+            extraction_res = response.json()
+            logger.info(f"--- [Phase 1: Extraction Complete] | Mode: {extraction_res.get('detected_mode')} ---")
+        else:
+            logger.info("--- [Phase 1: Skipped (Retry Mode)] ---")
+            # In retry mode, we might need to assume a mode or fetch it from previous metadata if needed.
+            # For now, we'll proceed as requested.
 
         # Phase 2: Agent Orchestration (Rule Validation)
         logger.info(f"--- [Phase 2: Starting Super Agent Orchestration] ---")

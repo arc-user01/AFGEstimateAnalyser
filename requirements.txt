@@ -11,8 +11,6 @@ openpyxl==3.1.5
 # Microsoft Agent Framework & Orchestration
 agent-framework==1.0.0rc3
 agent-framework-azure-ai==1.0.0rc3
-celery
-redis
 nest-asyncio
 openai
 pydantic

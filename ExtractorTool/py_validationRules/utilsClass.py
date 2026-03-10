@@ -20,8 +20,7 @@ class PyUtils:
         mask = df.apply(
             lambda r: r.astype(str).str.contains(r"[A-Za-z].*:", regex=True, na=False).any(),
             axis=1
-        )
-
+        )  
         df = df[~mask].reset_index(drop=True)
 
         temp = df.copy()
@@ -47,3 +46,4 @@ class PyUtils:
             return df.iloc[0:0]
 
         return df.loc[:last_data_index]
+
