@@ -31,55 +31,69 @@ class DatabaseClient:
 
         is_azure = ".database.windows.net" in server.lower()
 
-        # Detect installed ODBC driver
-        drivers = pyodbc.drivers()
-        driver = None
+        # Auto-detect ODBC drivers: prefer 18, fall back to 17
+        available_drivers = pyodbc.drivers()
+        driver_candidates = [d for d in ["ODBC Driver 18 for SQL Server", "ODBC Driver 17 for SQL Server"] if d in available_drivers]
+        if not driver_candidates:
+            raise RuntimeError("No supported ODBC Driver (17 or 18) is installed")
 
-        for d in ["ODBC Driver 18 for SQL Server", "ODBC Driver 17 for SQL Server"]:
-            if d in drivers:
-                driver = d
-                break
-
-        if not driver:
-            raise RuntimeError("ODBC Driver 17 or 18 not installed")
-
-        connection_string = (
-            f"DRIVER={{{driver}}};"
-            f"SERVER={server};"
-            f"DATABASE={database};"
-            f"UID={user};"
-            f"PWD={password};"
-            f"Connection Timeout={timeout};"
-        )
-
-        if is_azure:
-            connection_string += "Encrypt=yes;"
-            connection_string += f"TrustServerCertificate={'yes' if trust_cert else 'no'};"
-        else:
-            connection_string += "TrustServerCertificate=yes;"
-            if "18" in driver:
-                connection_string += "Encrypt=no;"
-
-        try:
-
-            self.conn = pyodbc.connect(connection_string)
-            self.cursor = self.conn.cursor()
-
-            quoted = urllib.parse.quote_plus(connection_string)
-
-            self.engine = create_engine(
-                f"mssql+pyodbc:///?odbc_connect={quoted}"
+        def _build_conn_str(driver_name):
+            cs = (
+                f"DRIVER={{{driver_name}}};"
+                f"SERVER={server};"
+                f"DATABASE={database};"
+                f"UID={user};"
+                f"PWD={password};"
+                f"Connection Timeout={timeout};"
             )
+            if is_azure:
+                cs += "Encrypt=yes;"
+                cs += f"TrustServerCertificate={'yes' if trust_cert else 'no'};"
+            else:
+                cs += "TrustServerCertificate=yes;"
+                if "18" in driver_name:
+                    cs += "Encrypt=no;"
+            return cs
 
-            print(f"Connected to {database} on {server}")
+        # Try each driver until one connects
+        last_error = None
+        for driver in driver_candidates:
+            connection_string = _build_conn_str(driver)
+            try:
+                self.conn = pyodbc.connect(connection_string)
+                self.cursor = self.conn.cursor()
 
-        except pyodbc.Error as e:
-            print("Database connection failed:", e)
-            raise
+                self._connection_string = connection_string
+
+                quoted = urllib.parse.quote_plus(connection_string)
+                self.engine = create_engine(
+                    f"mssql+pyodbc:///?odbc_connect={quoted}",
+                    pool_pre_ping=True
+                )
+
+                print(f"Connected to {database} on {server} ({driver})")
+                last_error = None
+                break
+            except pyodbc.Error as e:
+                last_error = e
+                print(f"Connection failed with {driver}: {e}")
+
+        if last_error:
+            raise last_error
 
     # ------------------------------------------------
     # Connection helpers
     # ------------------------------------------------
+
+    def _reconnect(self):
+        """Re-establish the pyodbc connection when it goes stale."""
+        try:
+            self.conn.close()
+        except Exception:
+            pass
+        self.conn = pyodbc.connect(self._connection_string)
+        self.cursor = self.conn.cursor()
+        print("Reconnected to database (stale connection recovered)")
 
     def get_connection(self):
         return self.conn
@@ -98,9 +112,19 @@ class DatabaseClient:
     # ------------------------------------------------
 
     def execute(self, query, params=None):
-        if params:
-            return self.cursor.execute(query, params)
-        return self.cursor.execute(query)
+        try:
+            if params:
+                return self.cursor.execute(query, params)
+            return self.cursor.execute(query)
+        except pyodbc.OperationalError as e:
+            # 08S01 = Communication link failure, 08003 = Connection not open
+            error_code = e.args[0] if e.args else ""
+            if error_code in ("08S01", "08003"):
+                self._reconnect()
+                if params:
+                    return self.cursor.execute(query, params)
+                return self.cursor.execute(query)
+            raise
 
     def execute_query(self, query, params=None):
         """Alias for execute() to maintain backward compatibility."""

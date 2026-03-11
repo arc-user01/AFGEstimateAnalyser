@@ -252,6 +252,59 @@ async def finalize_report(prev_output: dict, ctx: WorkflowContext) -> dict:
     }
     
     await ctx.yield_output(output_payload)
+
+    # ---- Cleanup all temporary artifacts for this job ----
+    import shutil
+    import glob
+
+    project_root_env = os.getenv("PROJECT_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    data_dir = os.path.join(project_root_env, "data")
+    job_tag = f"fl_{jobID}"
+
+    # Directories to clean: data/temp/fl_{jobID}, data/html_out/fl_{jobID}, data/results_table/fl_{jobID}
+    cleanup_dirs = [
+        os.path.join(data_dir, "temp", job_tag),
+        os.path.join(data_dir, "html_out", job_tag),
+        os.path.join(data_dir, "results_table", job_tag),
+    ]
+
+    # Also clean any upload files for this job
+    uploads_dir = os.path.join(data_dir, "uploads")
+    if os.path.isdir(uploads_dir):
+        for item in os.listdir(uploads_dir):
+            if jobID in item:
+                cleanup_dirs.append(os.path.join(uploads_dir, item))
+
+    for path in cleanup_dirs:
+        if os.path.exists(path):
+            try:
+                if os.path.isdir(path):
+                    shutil.rmtree(path)
+                else:
+                    os.remove(path)
+                logger.info(f"Cleanup: Removed {path}")
+            except Exception as ex:
+                logger.warning(f"Cleanup: Could not remove {path}: {ex}")
+
+    # Clean the temp validation results JSON
+    temp_json = os.path.join(tempfile.gettempdir(), f"validation_results_{jobID}.json")
+    if os.path.exists(temp_json):
+        try:
+            os.remove(temp_json)
+            logger.info(f"Cleanup: Removed {temp_json}")
+        except Exception as ex:
+            logger.warning(f"Cleanup: Could not remove {temp_json}: {ex}")
+
+    # Clean sandbox workspace (from tools.py)
+    sandbox_ws = os.path.join(tempfile.gettempdir(), f"agent_workspace_{f'ext_{jobID}'.replace('-', '_')}")
+    if os.path.exists(sandbox_ws):
+        try:
+            shutil.rmtree(sandbox_ws)
+            logger.info(f"Cleanup: Removed sandbox workspace {sandbox_ws}")
+        except Exception as ex:
+            logger.warning(f"Cleanup: Could not remove {sandbox_ws}: {ex}")
+
+    logger.info("Cleanup: All temporary job artifacts removed.")
     return output_payload
 
 
