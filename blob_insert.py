@@ -51,8 +51,8 @@ def upload_to_blob(local_file_path, container_name="test"):
 
 if __name__ == "__main__":
     # Specify the local file path here
-    local_path = r"C:\AI-projects\afg_agno\AFGEstimateAnalyser\waterfall_test.xltx"
-    local_path = os.getenv("EXCEL_SOURCE_FILE", "").strip()
+    local_path = r"C:\AI-projects\afg_agno\AFGEstimateAnalyser\new_waterfall_sheet.xltx"
+    #local_path = os.getenv("EXCEL_SOURCE_FILE", "").strip()
     
     if local_path and os.path.exists(local_path):
         upload_to_blob(local_path)

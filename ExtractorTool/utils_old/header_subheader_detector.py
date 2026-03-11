@@ -7,9 +7,12 @@ def detect_headers_and_subcategories(html_input: str):
     # ---------------------------------------
     # Load Config
     # ---------------------------------------
-    config_path = os.getenv("EXTRACTION_CONFIG_PATH")
-    if not config_path:
+    # Use environment variable for config path (fallback to local if not set)
+    config_path = os.getenv("EXTRACTION_CONFIG_PATH", r"C:\AI-projects\afg_agno\AFGEstimateAnalyser\ExtractorTool\extraction_config.json")
+    if not os.path.exists(config_path):
+        # Last resort fallback to current dir
         config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "extraction_config.json")
+        
     with open(config_path, 'r', encoding='utf-8') as f:
         config = json.load(f)
 

@@ -408,9 +408,6 @@ class DynamicSchemaMakerV2:
 
             col_name="_".join(cleaned)
 
-            # Truncate to SQL Server's max identifier length (128 chars)
-            if len(col_name) > 128:
-                col_name = col_name[:128].rstrip("_")
 
             if col_name not in duplicate_counter:
 

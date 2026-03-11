@@ -1,9 +1,0 @@
-Executor 'extraction' has no output type annotations. Type compatibility validation will be skipped for edges from this executor. Consider adding WorkflowContext[T] generics in handlers for better validation.
-Executor 'prepare_agent_input' has no output type annotations. Type compatibility validation will be skipped for edges from this executor. Consider adding WorkflowContext[T] generics in handlers for better validation.
-2026-03-11 02:18:07,681 - Workflow_4352395345 - INFO - Phase 1: Triggering Data Extraction for Job 4352395345...
-2026-03-11 02:19:12,824 - Workflow_4352395345 - INFO - Extraction Successful. Mode: waterfall
-Connected to Database: sql-afg-pmo-dev on afg-pmo.database.windows.net,1433
---- Running Debug Workflow for Job 4352395345 ---
-
-Workflow Result:
-{'status': 'error', 'error': 'No output produced by workflow'}

@@ -76,12 +76,9 @@ def run_rule_validation(
         
         overall_results = []
         
-        # Get project roots from env
-        extractor_root = os.getenv("EXTRACTOR_ROOT")
-        if not extractor_root:
-            return "Error: EXTRACTOR_ROOT environment variable is not set."
-        
-        proj_root = os.getenv("PROJECT_ROOT")
+        # Get project roots — dynamic from __file__, with env override
+        proj_root = os.getenv("PROJECT_ROOT") or os.path.dirname(framework_dir)
+        extractor_root = os.getenv("EXTRACTOR_ROOT") or os.path.join(proj_root, "ExtractorTool")
         
         # Add extractor root to sys.path for rules
         if extractor_root not in sys.path:

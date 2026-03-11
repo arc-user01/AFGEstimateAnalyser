@@ -55,7 +55,7 @@ Start-Job -Name "ExtractionService" -ScriptBlock {
     param($root, $env)
     foreach ($key in $env.Keys) { Set-Item "Env:$key" $env[$key] }
     cd $root
-    .\venv\Scripts\python.exe ExtractorTool\extraction_service.py
+    .\venv\Scripts\python.exe ExtractorTool\utils\extraction_service.py
 } -ArgumentList $rootDir, $envVars
 
 # 5. Start MSAF Standalone API (Background Job)

@@ -17,9 +17,14 @@ from azure.storage.blob import BlobServiceClient
 
 # Ensure project root and subdirectories are in path
 current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(current_dir)
+# extraction_service.py is in ExtractorTool/utils, so project_root is two levels up
+extractor_root = os.path.dirname(current_dir)
+project_root = os.path.dirname(extractor_root)
+
 if project_root not in sys.path:
     sys.path.append(project_root)
+if extractor_root not in sys.path:
+    sys.path.append(extractor_root)
 if current_dir not in sys.path:
     sys.path.append(current_dir)
 
@@ -103,7 +108,7 @@ app = FastAPI(title="TCO Extraction Service")
 class ExtractionRequest(BaseModel):
     jobID: str
     tco_file_path: str
-
+#localhost:1204
 @app.post("/extract")
 async def extract_tco(req: ExtractionRequest):
     jobID = req.jobID
@@ -184,8 +189,43 @@ async def extract_tco(req: ExtractionRequest):
             log_trace(jobID, "Critical Error: 'Intro' sheet not found!", "ERROR")
             return {"status": "error", "message": "Intro sheet not found"}
 
-        delivery_cell = intro_sheet.cells.get(5, 2)
-        delivery_val = (delivery_cell.string_value or "").strip().lower()
+        # Robustly find delivery mode cell
+        delivery_val = "unknown"
+        target_marker = "Agile or Waterfall".lower()
+        
+        # Scan first few rows/cols for the marker
+        found_cell = False
+        for r in range(15):
+            for c in range(10):
+                cell = intro_sheet.cells.get(r, c)
+                val = (cell.string_value or "").strip().lower()
+                if target_marker in val:
+                    # The label itself contains both words "agile" and "waterfall".
+                    # We must prioritize checking the next cell for the actual answer.
+                    next_cell = intro_sheet.cells.get(r, c + 1)
+                    next_val = (next_cell.string_value or "").strip().lower()
+                    
+                    if "agile" in next_val or "waterfall" in next_val:
+                        delivery_val = next_val
+                    elif "agile" in val and "waterfall" not in val:
+                        # If the cell just says "agile"
+                        delivery_val = val
+                    elif "waterfall" in val and "agile" not in val:
+                        # If the cell just says "waterfall"
+                        delivery_val = val
+                    else:
+                        # Fallback to the next cell even if it doesn't explicitly contain the words (might be empty)
+                        delivery_val = next_val
+                        
+                    found_cell = True
+                    break
+            if found_cell: break
+        
+        if not found_cell:
+            log_trace(jobID, "Warning: Could not find 'Agile or Waterfall' marker on Intro sheet. Falling back to (5,2).", "WARNING")
+            delivery_cell = intro_sheet.cells.get(5, 2)
+            delivery_val = (delivery_cell.string_value or "").strip().lower()
+
         log_trace(jobID, f"Delivery Mode detected: '{delivery_val}'")
 
         target_sheet_prefix = "agile" if "agile" in delivery_val else "waterfall" if "waterfall" in delivery_val else None
@@ -197,7 +237,14 @@ async def extract_tco(req: ExtractionRequest):
 
         for idx, sheet_cfg in enumerate(config["sheets"]):
             sheet_name = sheet_cfg["name"]
-            if target_sheet_prefix and sheet_name.lower() != "intro" and sheet_name.lower() != target_sheet_prefix:
+            
+            # Allow 'Intro' and the specific mode sheet
+            # Also allow 'ROI' or other explicitly configured sheets if they exist in the workbook
+            is_intro = sheet_name.lower() == "intro"
+            is_mode_match = target_sheet_prefix and target_sheet_prefix in sheet_name.lower()
+            
+            # If we established a mode, only process Intro and that mode's sheets
+            if target_sheet_prefix and not is_intro and not is_mode_match:
                 continue
 
             log_trace(jobID, f"Processing Sheet {idx+1}/{total_sheets}: {sheet_name}...")

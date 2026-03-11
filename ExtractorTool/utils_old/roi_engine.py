@@ -1,7 +1,7 @@
 import os
 import re
 from bs4 import BeautifulSoup
-from dbUtils.sql_client import insert_md_file
+from ExtractorTool.dbUtils.sql_client import insert_md_file
 
 def load_soup_rows(soup):
     """Convert BeautifulSoup table to row structure."""
@@ -123,9 +123,7 @@ def save_roi_blocks(sheet_name, header_name, blocks, result_folder, pg, schema_n
     os.makedirs(result_folder, exist_ok=True)
     
     for key, val in blocks.items():
-        table_name = re.sub(r'[\s\xa0]+', '_', f"{sheet_name}_{header_name}_{key}").lower()
-        table_name = re.sub(r'[^a-z0-9_]', '', table_name)
-        table_name = re.sub(r'_+', '_', table_name).strip("_")
+        table_name = f"{sheet_name}_{header_name}_{key}".lower().replace(" ", "_")
         file_name = f"{table_name}.md"
         path = os.path.join(result_folder, file_name)
         

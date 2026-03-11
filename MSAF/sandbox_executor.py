@@ -37,7 +37,7 @@ def main():
         else:
             schema_name = "dbo"
 
-        # Set up paths for imports
+        # Set up paths for imports — dynamic, works on local and App Service
         if proj_root and proj_root not in sys.path:
             sys.path.append(proj_root)
         if extractor_root and extractor_root not in sys.path:
@@ -45,13 +45,13 @@ def main():
         if framework_dir and framework_dir not in sys.path:
             sys.path.append(framework_dir)
             
-        # Re-initialize project-specific dependencies
-        from ExtractorTool.dbUtils.sql_client import DatabaseClient
-        local_db = DatabaseClient()
-        
-        # Capture stdout/stderr from the rule execution
+        # Capture stdout/stderr BEFORE any dependency init (DatabaseClient prints to stdout)
         sys.stdout = stdout_capture
         sys.stderr = stdout_capture
+            
+        # Re-initialize project-specific dependencies (uses ODBC 18 if available, else 17)
+        from ExtractorTool.dbUtils.sql_client import DatabaseClient
+        local_db = DatabaseClient()
         
         # Setup Logger for the sandbox
         sandbox_logger = logging.getLogger("sandbox")
@@ -76,13 +76,36 @@ def main():
                 sandbox_logger.warning(f"Could not fetch tables for schema {schema_name}: {e}")
 
         def inject_dynamic_schema(sql_query):
-            if not isinstance(sql_query, str) or not schema_tables:
+            if not isinstance(sql_query, str) or schema_name == "dbo":
                 return sql_query
             
-            # Sort by length descending to prevent partial replacements (e.g., 'table1' vs 'table10')
-            for t in sorted(schema_tables, key=len, reverse=True):
-                # Replace whole word not preceded by a dot
-                sql_query = re.sub(rf'(?<!\.)\b{t}\b', f'[{schema_name}].[{t}]', sql_query, flags=re.IGNORECASE)
+            # Phase 1: Prefix known schema tables (exact match from information_schema)
+            if schema_tables:
+                # Sort by length descending to prevent partial replacements (e.g., 'table1' vs 'table10')
+                for t in sorted(schema_tables, key=len, reverse=True):
+                    # Replace whole word not preceded by a dot or opening bracket
+                    sql_query = re.sub(rf'(?<![\[.])\b{re.escape(t)}\b', f'[{schema_name}].[{t}]', sql_query, flags=re.IGNORECASE)
+            
+            # Phase 2: Fallback — prefix any remaining unqualified table refs in FROM/JOIN/INTO/UPDATE
+            # This catches dynamically constructed table names not in the pre-fetched list
+            def _prefix_unqualified(match):
+                keyword = match.group(1)
+                table = match.group(2)
+                # Skip if already schema-qualified (has dot or bracket prefix)
+                if table.startswith('[') or '.' in table:
+                    return match.group(0)
+                # Skip SQL keywords that aren't table names
+                sql_keywords = {'select', 'where', 'and', 'or', 'on', 'set', 'values', 'into', 'not', 'null', 'as', 'in', 'is', 'like', 'between', 'case', 'when', 'then', 'else', 'end', 'order', 'group', 'by', 'having', 'limit', 'offset', 'union', 'all', 'exists', 'top'}
+                if table.lower() in sql_keywords:
+                    return match.group(0)
+                return f"{keyword} [{schema_name}].[{table}]"
+            
+            sql_query = re.sub(
+                r'(\bFROM\s+|\bJOIN\s+|\bINTO\s+|\bUPDATE\s+)([A-Za-z_][A-Za-z0-9_]*)\b',
+                _prefix_unqualified,
+                sql_query,
+                flags=re.IGNORECASE
+            )
             return sql_query
 
         # Wrap DB calls to auto-inject schemas
@@ -95,8 +118,24 @@ def main():
         class PdWrapper:
             def __getattr__(self, name):
                 return getattr(pd, name)
-            def read_sql(self, sql, con, *args, **kwargs):
-                return pd.read_sql(inject_dynamic_schema(sql), con, *args, **kwargs)
+            def read_sql(self, sql, con=None, *args, **kwargs):
+                injected_sql = inject_dynamic_schema(sql)
+                # Detect ? placeholders — SQLAlchemy doesn't support them,
+                # so fall back to raw pyodbc connection for parameterized queries
+                params = kwargs.get('params') or (args[0] if args else None)
+                if params and '?' in injected_sql:
+                    # Use raw pyodbc connection which supports ? placeholders
+                    return pd.read_sql(injected_sql, local_db.get_connection(), *args, **kwargs)
+                # Default: use SQLAlchemy engine
+                engine = local_db.get_engine()
+                return pd.read_sql(injected_sql, engine, *args, **kwargs)
+            def read_sql_query(self, sql, con=None, *args, **kwargs):
+                injected_sql = inject_dynamic_schema(sql)
+                params = kwargs.get('params') or (args[0] if args else None)
+                if params and '?' in injected_sql:
+                    return pd.read_sql_query(injected_sql, local_db.get_connection(), *args, **kwargs)
+                engine = local_db.get_engine()
+                return pd.read_sql_query(injected_sql, engine, *args, **kwargs)
 
         # Setup globals for the execution
         exec_globals = {

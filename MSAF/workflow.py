@@ -7,20 +7,12 @@ from typing import Dict, Any, List, Optional, Union
 from agent_framework import (
     WorkflowBuilder,
     WorkflowContext,
-    executor,
-    AgentExecutor,
-    AgentExecutorRequest,
-    Message,
-    Case,
-    Default
+    executor
 )
 
-# Rename 'agent' import to hide it from DevUI discovery
-# DevUI looks for 'agent' or 'workflow' variables to identify the entity type.
-# If 'agent' is imported at top level, it might misclassify this graph as a chat agent.
-from MSAF.agent import agent as _validation_agent
 from MSAF.logger import setup_task_logger
 from ExtractorTool.dbUtils.sql_client import DatabaseClient
+from MSAF.tools import run_rule_validation, summarize_rule_output
 
 
 # ------------------------------------------------
@@ -58,12 +50,39 @@ def normalize_input(data):
 
 
 # ------------------------------------------------
+# HUMAN INPUT NODE (Start)
+# ------------------------------------------------
+
+@executor(id="request_input")
+async def request_input(data: Any, ctx: WorkflowContext) -> dict:
+    """Prompt the user for input if not already provided."""
+    print(f"\n[TRACE] Node: request_input | Raw Input: {data}")
+    
+    normalized = normalize_input(data)
+    
+    # Check if we have the minimum required fields
+    if not normalized or "jobID" not in normalized:
+        prompt = "Hello! Please provide the validation job details in JSON format (jobID, tco_file_url, retry_flag)."
+        print(f"[TRACE] Node: request_input | Missing jobID, yielding prompt.")
+        await ctx.yield_output(prompt)
+        
+        # Wait for the next message from the user
+        user_msg = await ctx.wait_for_message()
+        print(f"[TRACE] Node: request_input | Received user message: {user_msg}")
+        normalized = normalize_input(user_msg)
+    
+    print(f"[TRACE] Node: request_input | Proceeding with: {normalized}")
+    await ctx.send_message(normalized)
+    return normalized
+
+
+# ------------------------------------------------
 # EXTRACTION NODE
 # ------------------------------------------------
 
 @executor(id="extraction")
 async def extract_data(input_data: dict, ctx: WorkflowContext) -> dict:
-    print(f"\n[TRACE] Node: extract_data | Input type: {type(input_data)}")
+    print(f"\n[TRACE] Node: extract_data | Input: {input_data}")
     
     data = normalize_input(input_data)
     jobID = str(data.get("jobID") or data.get("task_id") or "default")
@@ -108,9 +127,8 @@ async def extract_data(input_data: dict, ctx: WorkflowContext) -> dict:
         "detected_mode": detection_result.get("detected_mode", "capex")
     }
     
-    # Send message to downstream nodes (REQUIRED for graph traversal)
+    # Send message to downstream nodes
     await ctx.send_message(output_payload)
-    
     return output_payload
 
 
@@ -120,7 +138,7 @@ async def extract_data(input_data: dict, ctx: WorkflowContext) -> dict:
 
 @executor(id="rule_discovery")
 async def discover_rules(prev_output: dict, ctx: WorkflowContext) -> dict:
-    print(f"\n[TRACE] Node: rule_discovery | Input type: {type(prev_output)}")
+    print(f"\n[TRACE] Node: rule_discovery | Input: {prev_output}")
     
     jobID = prev_output.get("jobID")
     extraction_schema = prev_output.get("extraction_schema")
@@ -136,69 +154,80 @@ async def discover_rules(prev_output: dict, ctx: WorkflowContext) -> dict:
     except Exception as e:
         logger.error(f"Discovery error: {e}")
 
-    rule_codes = [r["rule_code"] for r in rules]
-    logger.info(f"Rule Discovery completed. Rules found: {rule_codes}")
+    # Build a list of dicts with rule_code and rule_name
+    rule_configs = [{"rule_code": r["rule_code"], "rule_name": r.get("rule_name", r["rule_code"])} for r in rules]
+    logger.info(f"Rule Discovery completed. Rules found: {[r['rule_code'] for r in rule_configs]}")
     
     output_payload = {
         "jobID": jobID,
-        "rules": rule_codes,
-        "detected_mode": detected_mode,
+        "rules": rule_configs,
         "extraction_schema": extraction_schema
     }
     
     await ctx.send_message(output_payload)
-    
     return output_payload
 
 
 # ------------------------------------------------
-# RULE ORCHESTRATOR NODE
+# EXECUTE RULES NODE
 # ------------------------------------------------
 
-@executor(id="rule_orchestrator")
-async def orchestrate_rules(prev_output: dict, ctx: WorkflowContext) -> dict:
-    print(f"\n[TRACE] Node: rule_orchestrator | Input type: {type(prev_output)}")
+import tempfile
+
+@executor(id="execute_rules")
+async def execute_rules(prev_output: dict, ctx: WorkflowContext) -> dict:
+    print(f"\n[TRACE] Node: execute_rules | Input: {prev_output}")
     
     jobID = prev_output.get("jobID")
     extraction_schema = prev_output.get("extraction_schema")
     rules = prev_output.get("rules", [])
     
     logger = setup_task_logger(jobID, f"Workflow_{jobID}")
-    logger.info(f"Phase 3: Orchestrating {len(rules)} rules")
+    logger.info(f"Phase 3: Executing {len(rules)} rules sequentially")
 
-    # Store results in state using .get() and .set()
-    results = ctx.state.get("orchestration_results") or []
-    results.append({"jobID": jobID, "rules_count": len(rules)})
-    ctx.state.set("orchestration_results", results)
+    results_dict = {}
+
+    for rule in rules:
+        rule_code = rule["rule_code"]
+        rule_desc = rule.get("rule_name", rule_code)
+        
+        logger.info(f"  -> Running rule: {rule_code}")
+        
+        # 1. Execute task
+        try:
+            # run_rule_validation is a @tool, but can be called directly in python
+            raw_output = run_rule_validation(rule_code=rule_code, extraction_schema=extraction_schema)
+        except Exception as e:
+            raw_output = f"Execution failed locally: {str(e)}"
+            
+        # 2. Summarize task
+        try:
+            summary = summarize_rule_output(rule_code=rule_code, rule_description=rule_desc, output=raw_output)
+        except Exception as e:
+            summary = f"Summarization failed: {str(e)}"
+            
+        results_dict[rule_code] = summary
+        
+    # 3. Store results in a temp JSON configuration
+    # Use system temp directory directly
+    temp_json_path = os.path.join(tempfile.gettempdir(), f"validation_results_{jobID}.json")
+    
+    try:
+        with open(temp_json_path, "w", encoding="utf-8") as f:
+            json.dump(results_dict, f, indent=2)
+        logger.info(f"Saved aggregated rule results to: {temp_json_path}")
+    except Exception as e:
+        logger.error(f"Failed to save temp JSON: {e}")
 
     output_payload = {
         "jobID": jobID,
         "extraction_schema": extraction_schema,
-        "route": "agent" if rules else "final",
-        "query": f"The extraction for job {jobID} in schema {extraction_schema} is complete. {len(rules)} rules were identified."
+        "results_file": temp_json_path,
+        "results": results_dict
     }
     
     await ctx.send_message(output_payload)
-    
     return output_payload
-
-
-# ------------------------------------------------
-# PREPARE AGENT REQUEST
-# ------------------------------------------------
-
-@executor(id="prepare_agent_request")
-async def prepare_agent_request(prev_output: dict, ctx: WorkflowContext) -> AgentExecutorRequest:
-    print(f"\n[TRACE] Node: prepare_agent_request | Input type: {type(prev_output)}")
-    query = prev_output.get("query", "No query provided.")
-    
-    request = AgentExecutorRequest(
-        messages=[Message(role="user", contents=[query])]
-    )
-    
-    await ctx.send_message(request)
-    
-    return request
 
 
 # ------------------------------------------------
@@ -206,35 +235,24 @@ async def prepare_agent_request(prev_output: dict, ctx: WorkflowContext) -> Agen
 # ------------------------------------------------
 
 @executor(id="final_report")
-async def finalize_report(data: Union[dict, Any], ctx: WorkflowContext) -> dict:
-    print(f"\n[TRACE] Node: final_report | Input type: {type(data)}")
+async def finalize_report(prev_output: dict, ctx: WorkflowContext) -> dict:
+    print(f"\n[TRACE] Node: final_report | Input keys: {list(prev_output.keys())}")
     
-    jobID = ctx.state.get("jobID", "unknown")
+    jobID = prev_output.get("jobID", ctx.state.get("jobID", "unknown"))
+    results = prev_output.get("results", {})
     
-    if isinstance(data, dict):
-        response = data.get("query", data.get("response", "No details available."))
-    else:
-        # Assume it's an Agent Response
-        response = str(data)
+    logger = setup_task_logger(jobID, f"Workflow_{jobID}")
+    logger.info("Phase 4: Generating Final Report Response")
 
-    report = f"# MSAF Validation Report\n\n- Job ID: {jobID}\n\n## Final Assessment\n{response}\n"
-
+    # The user requested: {job_id: result : <json of all the rules>}
     output_payload = {
-        "status": "success",
         "jobID": jobID,
-        "response": report
+        "status": "success",
+        "result": results
     }
     
     await ctx.yield_output(output_payload)
-    
     return output_payload
-
-
-# Define the Validation Agent Node using the HIDDEN agent import
-validation_agent_node = AgentExecutor(
-    agent=_validation_agent,
-    id="validation_agent"
-)
 
 
 # ------------------------------------------------
@@ -244,23 +262,13 @@ validation_agent_node = AgentExecutor(
 workflow = (
     WorkflowBuilder(
         name="MSAF_Validation_Workflow",
-        description="AFG estimate validation workflow",
-        start_executor=extract_data
+        description="AFG programmatic estimate validation workflow",
+        start_executor=request_input
     )
+    .add_edge(request_input, extract_data)
     .add_edge(extract_data, discover_rules)
-    .add_edge(discover_rules, orchestrate_rules)
-    .add_switch_case_edge_group(
-        orchestrate_rules,
-        [
-            Case(
-                condition=lambda data: isinstance(data, dict) and data.get("route") == "agent",
-                target=prepare_agent_request
-            ),
-            Default(target=finalize_report)
-        ]
-    )
-    .add_edge(prepare_agent_request, validation_agent_node)
-    .add_edge(validation_agent_node, finalize_report)
+    .add_edge(discover_rules, execute_rules)
+    .add_edge(execute_rules, finalize_report)
     .build()
 )
 
@@ -287,8 +295,9 @@ async def run_msaf_workflow(jobID: str, tco_file_url: str = None, questionaries_
     
     if outputs:
         last_output = outputs[-1]
-        if isinstance(last_output, dict) and "response" in last_output:
+        if isinstance(last_output, dict) and "result" in last_output:
             return last_output 
-        return {"status": "success", "jobID": jobID, "response": str(last_output)}
+        return {"status": "success", "jobID": jobID, "result": str(last_output)}
         
     return {"status": "error", "error": "Workflow did not produce outputs"}
+

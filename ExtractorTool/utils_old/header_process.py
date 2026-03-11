@@ -3,7 +3,7 @@ import os
 
 from utils.schema_maker import generate_schema_from_html, remove_schema_rows_with_tracker
 from utils.tbl_builder import build_html_table
-from dbUtils.sql_client import insert_md_file
+from ExtractorTool.dbUtils.sql_client import insert_md_file
 
 
 # -----------------------------
@@ -41,12 +41,8 @@ def limit_words(txt, n):
     return txt
 
 def clean_filename(txt):
-    # Normalize all whitespace (newlines, tabs, \xa0, etc.) to single spaces first
-    txt = re.sub(r'[\s\xa0]+', ' ', txt).strip()
     txt = re.sub(r'[^a-zA-Z0-9 _]', '', txt)
     txt = txt.replace(" ", "_").lower()
-    # Collapse consecutive underscores into one
-    txt = re.sub(r'_+', '_', txt).strip("_")
     return txt
 
 
@@ -180,9 +176,12 @@ def process_header_tables(
     
     print(f"\n[PROCESS] Header: {header_name} | Sheet: {sheet_name}")
 
-    config_path = os.getenv("EXTRACTION_CONFIG_PATH")
-    if not config_path:
-        config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "extraction_config.json")
+    # Use environment variable for config path (fallback to local if not set)
+    config_path = os.getenv("EXTRACTION_CONFIG_PATH", r"C:\AI-projects\afg_agno\AFGEstimateAnalyser\ExtractorTool\extraction_config.json")
+    if not os.path.exists(config_path):
+        # Last resort fallback to project root dir (header_process is in ExtractorTool/utils)
+        config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "ExtractorTool", "extraction_config.json")
+    
     with open(config_path, 'r', encoding='utf-8') as f:
         config = json.load(f)
 
@@ -414,9 +413,9 @@ def extract_and_save_filtered(scoped_td_data, start_row, stop_row, header_start,
     if nested_name:
         ext_clean = clean_filename(nested_name)
         ext_final = limit_words(ext_clean, 3)
-        table_name = re.sub(r'_+', '_', f"{base_final}_{ext_final}").strip("_").lower()
+        table_name = f"{base_final}_{ext_final}".lower()
     else:
-        table_name = re.sub(r'_+', '_', base_final).strip("_").lower()
+        table_name = base_final.lower()
 
     file_name = f"{table_name}.md"
     save_path = os.path.join(result_folder, file_name)
