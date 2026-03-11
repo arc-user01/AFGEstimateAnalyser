@@ -25,12 +25,17 @@ def main():
         proj_root = payload.get("proj_root")
         extractor_root = payload.get("extractor_root")
         framework_dir = payload.get("framework_dir")
-        task_id = payload.get("task_id", "default")
+        extraction_schema = payload.get("extraction_schema")
+        jobID = payload.get("jobID") or payload.get("task_id", "default")
     
         # Determine schema
-        schema_name = "dbo"
-        if task_id and task_id != "default":
-            schema_name = f"ext_{task_id}".replace("-", "_").lower()
+        if extraction_schema:
+            schema_name = extraction_schema
+        elif jobID and jobID != "default":
+            # Sync with Extraction Service: EXACT casing, replace hyphen
+            schema_name = f"ext_{jobID}".replace("-", "_")
+        else:
+            schema_name = "dbo"
 
         # Set up paths for imports
         if proj_root and proj_root not in sys.path:
@@ -41,7 +46,7 @@ def main():
             sys.path.append(framework_dir)
             
         # Re-initialize project-specific dependencies
-        from sql_client import DatabaseClient
+        from ExtractorTool.dbUtils.sql_client import DatabaseClient
         local_db = DatabaseClient()
         
         # Capture stdout/stderr from the rule execution
@@ -81,10 +86,11 @@ def main():
             return sql_query
 
         # Wrap DB calls to auto-inject schemas
-        original_execute_query = local_db.execute_query
-        def wrapped_execute_query(query, params=None):
-            return original_execute_query(inject_dynamic_schema(query), params)
-        local_db.execute_query = wrapped_execute_query
+        original_execute = local_db.execute
+        def wrapped_execute(query, params=None):
+            return original_execute(inject_dynamic_schema(query), params)
+        local_db.execute = wrapped_execute
+        local_db.execute_query = wrapped_execute # Compatibility for old rules
 
         class PdWrapper:
             def __getattr__(self, name):

@@ -1,7 +1,7 @@
 import os
 import re
 from bs4 import BeautifulSoup
-from pg_utils.pgsql_client import insert_md_file
+from ExtractorTool.dbUtils.sql_client import insert_md_file
 
 def load_soup_rows(soup):
     """Convert BeautifulSoup table to row structure."""

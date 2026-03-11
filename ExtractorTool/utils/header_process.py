@@ -3,7 +3,7 @@ import os
 
 from utils.schema_maker import generate_schema_from_html, remove_schema_rows_with_tracker
 from utils.tbl_builder import build_html_table
-from pg_utils.pgsql_client import insert_md_file
+from ExtractorTool.dbUtils.sql_client import insert_md_file
 
 
 # -----------------------------

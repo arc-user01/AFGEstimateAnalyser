@@ -53,14 +53,21 @@ async def process_msaf_task(req: MSAFRequest):
         raise HTTPException(status_code=400, detail="tco_file_url is required when retry_flag is false.")
 
     # Call workflow directly
-    result = await run_msaf_workflow(
-        jobID=req.jobID,
-        tco_file_url=req.tco_file_url,
-        questionaries_file_url=req.questionaries_file_url,
-        retry_flag=req.retry_flag
-    )
+    try:
+        result = await run_msaf_workflow(
+            jobID=req.jobID,
+            tco_file_url=req.tco_file_url,
+            questionaries_file_url=req.questionaries_file_url,
+            retry_flag=req.retry_flag
+        )
+    except Exception as e:
+        import traceback
+        error_detail = f"Workflow Crash: {str(e)}\n{traceback.format_exc()}"
+        print(f"[CRITICAL ERROR] {error_detail}")
+        raise HTTPException(status_code=500, detail=error_detail)
 
     if result["status"] == "error":
+        print(f"[WORKFLOW ERROR] {result.get('error')}")
         raise HTTPException(status_code=500, detail=result.get("error", "Unknown error in MSAF workflow."))
 
     return result

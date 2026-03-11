@@ -1,93 +1,106 @@
-# AFG Estimate Analyser Architecture
+# System Architecture - AFG Estimate Analyser
 
-This document describes the end-to-end architecture of the **AFG Estimate Analyser** system, detailing how components interact from UI upload down to the sandboxed agent validation.
+This document provides a comprehensive overview of the AFG Estimate Analyser's technical architecture, component interactions, and the end-to-end data flow.
 
-## End-to-End Workflow Diagram
+## 1. System Overview
+
+The AFG Estimate Analyser is a specialized platform designed to automate the extraction, analysis, and validation of Excel-based Estimation Toolkits (TCOs). It transforms complex, unstructured Excel data into structured SQL tables and applies AI-driven agentic workflows to perform technical and financial validations.
+
+## 2. Component Diagram
 
 ```mermaid
 graph TD
-    %% Define Styles
-    classDef frontend fill:#3b82f6,stroke:#1d4ed8,stroke-width:2px,color:#fff;
-    classDef backend fill:#10b981,stroke:#047857,stroke-width:2px,color:#fff;
-    classDef worker fill:#8b5cf6,stroke:#6d28d9,stroke-width:2px,color:#fff;
-    classDef db fill:#f59e0b,stroke:#b45309,stroke-width:2px,color:#fff;
-    classDef storage fill:#64748b,stroke:#334155,stroke-width:2px,color:#fff;
-    classDef ai fill:#ec4899,stroke:#be185d,stroke-width:2px,color:#fff;
-
-    %% Client Layer
-    subgraph Client ["Client Layer"]
-        UI["Frontend UI (React/Node)"]:::frontend
-    end
-
-    %% API Layer
-    subgraph API ["API & Orchestration Layer"]
-        FastAPI["Backend API (FastAPI) <br> Port 2357"]:::backend
-        RedisBroker[("Redis Broker & Result Backend <br> Port 6379")]:::db
-    end
-
-    %% Extraction Layer
-    subgraph Extraction ["Extraction Service Layer"]
-        ExtractorAPI["Extraction Service (FastAPI) <br> Port 1204"]:::worker
-        AsposeEngine["Aspose.Cells Engine <br> (HTML Conversion)"]:::worker
-        FileSys[("File System <br> Isolated /fl_task_id/")]:::storage
-        Parser["HTML Parsers & ROI Engine <br> (BeautifulSoup)"]:::worker
-    end
-
-    %% Agent Layer
-    subgraph MSAF ["Microsoft Agent Framework (MSAF)"]
-        CeleryWorker["Celery Worker <br> (Task Orchestrator)"]:::worker
-        AgentOrchestrator["Agent Orchestrator <br> (LLM Prompting)"]:::ai
-        AzureOpenAI(("Azure OpenAI <br> (LLM Engine)")):::ai
-        ToolRegistry["Tool Registry <br> (get_available_rules, run_rule_validation)"]:::worker
-        Sandbox["Sandbox Executor <br> (Subprocess Validation Environment)"]:::worker
-    end
-
-    %% Database Layer
-    subgraph Database ["SQL Server Database"]
-        MainDB[("SQL Server")]:::db
-        ConfigView["vr.vw_consolidated_validation_config <br> (Rule Settings)"]:::db
-        ExtSchema["Dynamic Schema <br> [ext_task_id].[tables]"]:::db
-    end
-
-    %% Relationships & Flow
-    UI -- "1. Uploads TCO Excel" --> FastAPI
-    UI -- "9. Listens (SSE) to Traceability Log" --> RedisBroker
+    Client["Client / Postman"] -- "HTTP POST /api/v1/msaf_process" --> MSAF_API["MSAF API (FastAPI)"]
     
-    FastAPI -- "2. Routes Task & File Paths" --> RedisBroker
-    RedisBroker -- "3. Picks up job" --> CeleryWorker
+    subgraph "Phase 1: Extraction"
+        MSAF_API -- "HTTP POST /extract" --> Extractor["Extraction Service (FastAPI)"]
+        Extractor -- "Download" --> Blob["Azure Blob Storage"]
+        Extractor -- "Convert & Parse" --> Excel["Aspose.Cells / BeautifulSoup"]
+        Extractor -- "Store Data" --> SQL["SQL Server (ext_task_id schema)"]
+    end
     
-    CeleryWorker -- "4. Triggers Extraction" --> ExtractorAPI
-    ExtractorAPI -- "Loads Workbook" --> AsposeEngine
-    AsposeEngine -- "Saves HTML" --> FileSys
-    ExtractorAPI -- "Extracts Tables" --> Parser
-    Parser -- "Creates Schema & Tables" --> ExtSchema
+    subgraph "Phase 2: Analysis"
+        MSAF_API -- "Invoke Workflow" --> Workflow["Workflow (MSAF/workflow.py)"]
+        Workflow -- "Run Agent" --> Agent["Agent (MSAF/agent.py)"]
+        Agent -- "Read Metadata" --> SQL
+        Agent -- "Execute Tools" --> Tools["Validation Rules"]
+        Tools -- "Read Data" --> SQL
+        Tools -- "Sandbox Execution" --> Sandbox["Python Sandbox"]
+    end
     
-    CeleryWorker -- "5. Init Super Agent" --> AgentOrchestrator
-    AgentOrchestrator -- "6. Request Rules by Mode" --> ToolRegistry
-    ToolRegistry -- "Queries matching rules" --> ConfigView
-    ToolRegistry -- "Returns Rules JSON" --> AgentOrchestrator
-    
-    AgentOrchestrator -- "7. Determines which rules to run" --> AzureOpenAI
-    AzureOpenAI -- "Executes run_rule_validation" --> ToolRegistry
-    ToolRegistry -- "8. Injects Schema & Spawns" --> Sandbox
-    Sandbox -- "Reads injected DataFrame" --> ExtSchema
-    
-    Sandbox -- "Returns Pass/Fail & Output" --> ToolRegistry
-    ToolRegistry -- "Summarizes Results" --> AgentOrchestrator
-    AgentOrchestrator -- "10. Final Report" --> CeleryWorker
-    CeleryWorker -- "Posts Result" --> RedisBroker
-    FastAPI -- "Fetches Final Result" --> RedisBroker
+    Workflow -- "Generate Response" --> MSAF_API
+    MSAF_API -- "Final Report" --> Client
 ```
 
-## Component Breakdown
+## 3. Detailed Data Flow (Step-by-Step)
 
-1. **Frontend UI**: User interface to upload TCO Excel sheets and monitor real-time server-side events (SSE).
-2. **Backend API**: The primary entry gateway that intercepts uploads, saves them temporarily, and delegates work to the asynchronous Celery queue.
-3. **Redis Broker**: Acts as the message broker for Celery queues (`get_task_queue`), the state backend for results (`result_queue`), and the PubSub engine for real-time frontend logs (`tracebility_queue`).
-4. **Extraction Service**: Dedicated process utilizing `Aspose.Cells` to map Excel sheets to precise HTML representations. It enforces strict isolation:
-   - **File System**: `data/html_out/fl_<task_id>`
-   - **Database**: `[ext_<task_id>]` Schema
-5. **MSAF Celery Worker**: Handles asynchronous task loads. Initiates extraction, then spins up the Azure OpenAI Agent.
-6. **Agent Orchestrator**: Uses Azure OpenAI (`gpt-4.1`). It leverages tools to actively fetch rules based on the detected layout (Waterfall/Agile) and loop through them sequentially.
-7. **Sandbox Executor**: For extreme security and stability, the Agent does not run rule functions in its own thread. Instead, it spawns an isolated python `subprocess`. This sandbox contains SQL-intercept engines to ensure legacy raw SQL strings automatically bind to the correct isolated `[ext_<task_id>]` schema before utilizing the `pandas` analytic library. 
-8. **SQL Server Database**: The central truth that holds configuration data (`vw_consolidated_validation_config`) and all dynamic extracted task grid states.
+### Step 1: Request Initiation
+The workflow starts with a POST request to `/api/v1/msaf_process` containing a `task_id` and a `tco_file_path` (either a local path or an Azure Blob URL).
+
+### Step 2: Extraction Triggering (`MSAF/workflow.py`)
+The MSAF API initiates the **Direct Workflow**, which first calls the **Extraction Service** asynchronously.
+
+### Step 3: High-Fidelity Extraction (`ExtractorTool/extraction_service.py`)
+1.  **Job Sandboxing**: A temporary workspace is created at `data/temp/fl_<task_id>/`.
+2.  **Blob Acquisition**: If the input is a Blob URL, the service downloads the Excel file to the temp workspace.
+3.  **Excel-to-HTML Conversion**: `Aspose.Cells` converts Excel sheets into HTML files (preserving all coordinates like `A25_`).
+4.  **Schema Preparation**: A unique SQL schema `ext_<task_id>` is created in SQL Server to ensure job isolation.
+5.  **Parsing & Mapping**:
+    - `BeautifulSoup` parses the HTML.
+    - `header_subheader_detector.py` identifies nested structures.
+    - `header_process.py` extracts tables and prepares them for database insertion.
+6.  **Database Persistence**: Structured data is inserted into the `ext_<task_id>` schema. Metadata is stored for agent discovery.
+7.  **Self-Cleanup**: The entire `data/temp/fl_<task_id>/` folder is deleted, leaving no trace on the filesystem.
+
+### Step 4: Agent Orchestration (`MSAF/agent.py`)
+Once extraction succeeds, the **Super Agent Orchestrator** takes over:
+1.  **Context Discovery**: The agent queries the metadata tables in the `ext_<task_id>` schema to understand the available data.
+2.  **Tool Selection**: Based on the project requirements, it selects appropriate validation rules.
+3.  **Deep Analysis**:
+    - The agent uses `sql_client.py` to retrieve specific data blocks.
+    - It executes complex logic/calculations via `sandbox_executor.py` for safety.
+4.  **Synthesis**: The agent compiles individual cross-checks into a holistic validation report.
+
+### Step 5: Final Response
+The MSAF API returns the structured analysis result to the user.
+
+## 4. Directory Structure
+
+```text
+AFGEstimateAnalyser/
+├── architecture.md           # This document
+├── ExtractorTool/            # Phase 1: Data extraction service
+│   ├── extraction_service.py # Core extraction microservice
+│   ├── utils/                # HTML parsing and coordination
+│   └── pg_utils/             # SQL Server insertion utilities
+├── MSAF/                     # Phase 2: Agent framework
+│   ├── main.py               # Standalone FastAPI entry point
+│   ├── agent.py              # Super Agent (exported as 'agent')
+│   ├── workflow.py           # Multi-step Workflow (exported as 'workflow')
+│   ├── scripts/              # Standalone utility scripts (non-scanned)
+│   └── sandbox_executor.py   # Secure tool execution environment
+├── data/                     # Data storage
+│   └── temp/                 # ephemeral job-specific sandboxes
+├── sql_client.py             # Unified SQL Server client
+├── .env                      # Global configuration
+└── pl_deployment.ps1         # Deployment & Setup script
+```
+
+## 5. Technology Stack
+
+| Layer | Technology |
+| :--- | :--- |
+| **API Framework** | FastAPI |
+| **Excel Processing** | Aspose.Cells (High-fidelity HTML conversion) |
+| **Parsing** | BeautifulSoup4 |
+| **Database** | SQL Server (dynamic per-job schemas) |
+| **Cloud Storage** | Azure Blob Storage |
+| **AI Agent** | Microsoft Agent Framework (Agno) |
+| **Infrastructure** | Python 3.x, PowerShell |
+
+## 6. Key Architectural Principles
+
+1.  **Zero-Footprint (Stateless)**: The system treats the local filesystem as a transient sandbox. All intermediate files are strictly cleaned up, ensuring suitability for scaled cloud environments.
+2.  **Database Isolation**: Each extraction task operates within its own SQL schema (`ext_JOBID`), preventing data collisions between concurrent users.
+3.  **Coordinate Precision**: By preserving Excel coordinates throughout the HTML conversion, the system allows for exact cell-level referencing during analysis.
+4.  **Decoupled Services**: The separation of the Extraction Service and MSAF allows for independent scaling and maintenance of the "Data Engineering" and "AI Analysis" layers.

@@ -15,12 +15,7 @@ import subprocess # For diagnostic
 from typing import List, Annotated, Dict, Any, Optional
 from agent_framework import tool
 from pydantic import Field
-# Add project root to sys.path to find sql_client
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if project_root not in sys.path:
-    sys.path.append(project_root)
-
-from sql_client import DatabaseClient
+from ExtractorTool.dbUtils.sql_client import DatabaseClient
 from MSAF.summarization import summarize_rule_output as _summarize_rule_output
 
 # Ensure the framework directory is in the path for both this process and spawned children
@@ -45,29 +40,39 @@ def get_available_rules(
     """
     logger.info(f"Tool Action: Discovering available rules | Filter: '{sheet_name}'")
     try:
+        # Log config source
+        server = os.getenv("DB_SERVER", "unknown")
+        db_name = os.getenv("DB_NAME", "unknown")
+        logger.info(f"Fetching rule list from DB: {db_name} on {server} (View: vw_consolidated_validation_config)")
+        
         rules = db.list_available_rules(sheet_name=sheet_name)
         if not rules:
-            return f"No rules found for sheet '{sheet_name}'."
+            return f"No rules found for sheet '{sheet_name}' in database '{db_name}'."
         return json.dumps(rules, indent=2, default=str)
     except Exception as e:
-        error_msg = f"Error listing rules: {str(e)}"
+        error_msg = f"Error listing rules from {os.getenv('DB_NAME')}: {str(e)}"
         logger.error(error_msg)
         return error_msg
 
 @tool(approval_mode="never_require")
 def run_rule_validation(
     rule_code: Annotated[str, Field(description="The unique code of the rule to execute.")],
-    task_id: Annotated[Optional[str], Field(description="Internal task ID for isolation and logging.")] = "default"
+    extraction_schema: Annotated[Optional[str], Field(description="The formal SQL schema name (e.g. 'ext_1234') containing the extracted data for this project.")] = "dbo"
 ) -> str:
     """
     Executes all tasks associated with a given rule_code sequentially.
     Tasks are executed in their specific task_execution_order within a sandboxed environment.
     """
-    logger.info(f"Tool Action: Running multi-task validation for Rule Code: {rule_code} | Task Isolation: {task_id}")
+    logger.info(f"Tool Action: Running multi-task validation for Rule Code: {rule_code} | Schema: {extraction_schema}")
     try:
+        # Log config source
+        server = os.getenv("DB_SERVER", "unknown")
+        db_name = os.getenv("DB_NAME", "unknown")
+        logger.info(f"Fetching task config for '{rule_code}' from DB: {db_name} on {server}")
+        
         tasks = db.fetch_rule_config(rule_code)
         if not tasks:
-            return f"Rule Code '{rule_code}' not found."
+            return f"Rule Code '{rule_code}' not found in database '{db_name}'."
         
         overall_results = []
         
@@ -82,10 +87,10 @@ def run_rule_validation(
         if extractor_root not in sys.path:
             sys.path.append(extractor_root)
 
-        # Create temporary workspace for this task_id if it's not "default"
+        # Create temporary workspace for this extraction_schema if it's not "dbo"
         workspace_dir = None
-        if task_id and task_id != "default":
-            workspace_dir = os.path.join(tempfile.gettempdir(), f"agent_workspace_{task_id}")
+        if extraction_schema and extraction_schema != "dbo":
+            workspace_dir = os.path.join(tempfile.gettempdir(), f"agent_workspace_{extraction_schema}")
             os.makedirs(workspace_dir, exist_ok=True)
             logger.info(f"Created isolated workspace: {workspace_dir}")
 
@@ -101,6 +106,11 @@ def run_rule_validation(
                 continue
             
             params = task.get("task_params", {})
+            if isinstance(params, str) and params.strip():
+                try:
+                    params = json.loads(params)
+                except:
+                    params = {}
             if not isinstance(params, dict): params = {}
 
             # Remote File Support: Handle URLs if present
@@ -132,7 +142,7 @@ def run_rule_validation(
                 "proj_root": proj_root,
                 "extractor_root": extractor_root,
                 "framework_dir": framework_dir,
-                "task_id": task_id
+                "extraction_schema": extraction_schema
             }
             
             try:

@@ -28,7 +28,20 @@ if (-not (Test-Path (Join-Path $uiDir "node_modules"))) {
     Pop-Location
 }
 
-# 3. Environment Variables Setup (for Jobs)
+# 3. Environment Variables & .env Cleanup
+$envPath = Join-Path $rootDir ".env"
+if (Test-Path $envPath) {
+    Write-Host "Auto-updating .env with local project paths..." -ForegroundColor Yellow
+    $content = Get-Content $envPath
+    # Clean up absolute paths to match current root
+    $content = $content -replace '(?m)^PROJECT_ROOT=.*', "PROJECT_ROOT=$rootDir"
+    $content = $content -replace '(?m)^EXTRACTOR_ROOT=.*', "EXTRACTOR_ROOT=$(Join-Path $rootDir 'ExtractorTool')"
+    $content = $content -replace '(?m)^MSAF_ROOT=.*', "MSAF_ROOT=$(Join-Path $rootDir 'MSAF')"
+    $content = $content -replace '(?m)^EXTRACTION_CONFIG_PATH=.*', "EXTRACTION_CONFIG_PATH=$(Join-Path $rootDir 'ExtractorTool\extraction_config.json')"
+    $content | Set-Content $envPath
+}
+
+# Values for background jobs
 $envVars = @{
     "PYTHONPATH" = $rootDir
     "PROJECT_ROOT" = $rootDir
@@ -54,15 +67,19 @@ Start-Job -Name "MSAF_API" -ScriptBlock {
     .\venv\Scripts\python.exe MSAF/main.py
 } -ArgumentList $rootDir, $envVars
 
-# 6. Start Frontend UI
-Write-Host "Starting Frontend UI (npm run dev)..." -ForegroundColor Green
-Start-Job -Name "FrontendUI" -ScriptBlock {
-    param($ui)
-    cd $ui
-    npm run dev
-} -ArgumentList $uiDir
+# 6. Start Official Microsoft Agent Framework DevUI
+Write-Host "Starting Official DevUI (agent-framework devui)..." -ForegroundColor Green
+Start-Job -Name "DevUI" -ScriptBlock {
+    param($root, $env)
+    foreach ($key in $env.Keys) { Set-Item "Env:$key" $env[$key] }
+    cd $root
+    .\venv\Scripts\devui.exe MSAF --port 5000
+} -ArgumentList $rootDir, $envVars
 
 Write-Host "`n--- All services have been started in the background ---" -ForegroundColor Cyan
-Write-Host "Use 'Get-Job' to see the status of background processes."
-Write-Host "Use 'Receive-Job -Name <Name> -Keep' to see output logs."
+Write-Host "Opening live log windows..." -ForegroundColor Yellow
+
+# Start Log Follower Windows
+
+Write-Host "Use 'Get-Job' to see the status of background processes in this window."
 Write-Host "To stop all services, run: Get-Job | Stop-Job"

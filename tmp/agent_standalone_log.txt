@@ -1,0 +1,18 @@
+Executor 'extraction' has no output type annotations. Type compatibility validation will be skipped for edges from this executor. Consider adding WorkflowContext[T] generics in handlers for better validation.
+Executor 'prepare_agent_input' has no output type annotations. Type compatibility validation will be skipped for edges from this executor. Consider adding WorkflowContext[T] generics in handlers for better validation.
+INFO:TestAgent:Starting Microsoft Agent task [test_4352395345] with query: The extraction for mode 'waterfall' and Job ID '4352395345' is ready. Please run all relevant validation rules for this project.
+INFO:httpx:HTTP Request: POST https://afg-pmo-resource.openai.azure.com/openai/deployments/gpt-4.1/chat/completions?api-version=2024-10-21 "HTTP/1.1 200 OK"
+INFO:agent_framework:Function name: get_available_rules
+INFO:MicrosoftAgentTools:Tool Action: Discovering available rules | Filter: 'waterfall'
+ERROR:MicrosoftAgentTools:Error listing rules: 'DatabaseClient' object has no attribute 'list_available_rules'
+INFO:agent_framework:Function get_available_rules succeeded.
+INFO:agent_framework:Function duration: 0.000087s
+INFO:httpx:HTTP Request: POST https://afg-pmo-resource.openai.azure.com/openai/deployments/gpt-4.1/chat/completions?api-version=2024-10-21 "HTTP/1.1 200 OK"
+INFO:TestAgent:Agent task completed.
+Connected to Database: sql-afg-pmo-dev on afg-pmo.database.windows.net,1433
+--- Testing Agent with query: The extraction for mode 'waterfall' and Job ID '4352395345' is ready. Please run all relevant validation rules for this project. ---
+
+Agent Response:
+I'm unable to retrieve the list of available validation rules for the "waterfall" mode due to a system error. Without access to the relevant rule codes, I can't proceed with running the validations.
+
+Would you like to try again, or is there a specific rule you want to validate for Job ID 4352395345? Let me know how youÆd like to proceed!

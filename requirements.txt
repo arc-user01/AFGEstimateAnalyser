@@ -11,6 +11,9 @@ openpyxl==3.1.5
 # Microsoft Agent Framework & Orchestration
 agent-framework==1.0.0rc3
 agent-framework-azure-ai==1.0.0rc3
+agent-framework-devui --pre
+opentelemetry-api
+opentelemetry-sdk
 nest-asyncio
 openai
 pydantic
@@ -23,6 +26,7 @@ python-multipart
 
 # Extraction Specifics
 aspose-cells-python==26.2.0
+azure-storage-blob
 
 # Scientific/Calculation (from afg_final)
 numpy==2.4.2

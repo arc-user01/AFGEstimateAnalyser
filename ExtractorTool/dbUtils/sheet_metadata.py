@@ -1,8 +1,6 @@
 import sys
 import os
-# Add project root to path for sql_client
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from sql_client import DatabaseClient
+from ExtractorTool.dbUtils.sql_client import DatabaseClient
 
 
 # --------------------------------------------------
@@ -23,7 +21,7 @@ def create_metadata_table(pg, schema_name="dbo"):
     )
     END
     """
-    pg.cur.execute(check_sql + create_sql)
+    pg.cursor.execute(check_sql + create_sql)
     pg.conn.commit()
 
     print("sheet_metadata table ready")
@@ -67,7 +65,7 @@ def insert_sheet_metadata(pg, sheet_name, header_subcat_dict, schema_name="dbo")
         return
 
     try:
-        pg.cur.executemany(sql, rows)
+        pg.cursor.executemany(sql, rows)
         pg.conn.commit()
         print("Inserted metadata rows:", len(rows))
     except Exception as e:
@@ -76,6 +74,6 @@ def insert_sheet_metadata(pg, sheet_name, header_subcat_dict, schema_name="dbo")
         pg.conn.rollback()
         for r in rows:
             try:
-                pg.cur.execute(sql, r)
+                pg.cursor.execute(sql, r)
             except: pass
         pg.conn.commit()
